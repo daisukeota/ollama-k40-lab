@@ -42,10 +42,11 @@ CUDA_ARCHITECTURES?=50;52;53;60;61;62;70;72;75;80;86
 We override:
 
 ```bash
-make runners CUDA_ARCHITECTURES=35
+make dist CUDA_ARCHITECTURES=35
 ```
 
-so only **sm_35** CUBIN is built (faster build, matches K40).
+so only **sm_35** CUBIN is built (faster build, matches K40).  
+Use **`make dist`** (not only `make runners`) so artifacts land in `dist/linux-amd64/lib/ollama/` for the runtime image COPY.
 
 ## GPU minimum gate
 
@@ -108,6 +109,7 @@ Default `gcc`/`g++` remain **11** (Go/CGO + runtime `libstdc++`). Only nvcc host
 |---------|--------|
 | `cannot unmarshal object into ... format of type string` | Still on ≤0.4.x — rebuild with `OLLAMA_VERSION=v0.5.4+` |
 | `std_function.h` / `parameter packs not expanded` | nvcc still on GCC 11 — ensure `NVCC_PREPEND_FLAGS=-ccbin /usr/bin/g++-10` |
+| `dist/linux-amd64/lib: not found` | Used `make runners` only — need `make dist` so libs are installed under `dist/` |
 | Build cannot find CUDA 11 | `/usr/local/cuda-11` symlink |
 | `CUDA GPU is too old` | `CudaComputeMajorMin` / `MinorMin` patch + ldflags |
 | `nvcc fatal: Unsupported gpu architecture 'compute_35'` | Using CUDA 12 by mistake |

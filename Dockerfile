@@ -88,18 +88,20 @@ RUN if grep -q 'CudaComputeMajorMin' discover/gpu.go; then \
     fi \
     && grep -nE 'CudaCompute(Major|Minor)?Min' discover/gpu.go | head -n 20
 
-# Build CUDA 11 runners for sm_35 only (no cuda-12 path present), then the Go server
-RUN make -j"$(nproc)" runners \
+# `make runners` only builds under llama/build/; `make dist` also installs into dist/.../lib/ollama
+RUN make -j"$(nproc)" dist \
       CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
-      OLLAMA_SKIP_ROCM_GENERATE=1
+      OLLAMA_SKIP_ROCM_GENERATE=1 \
+    && test -d dist/linux-amd64/lib/ollama \
+    && find dist/linux-amd64/lib/ollama -type f | head -n 40
 
-RUN mkdir -p dist/linux-amd64/bin \
-    && go build -trimpath \
-         -ldflags "-s -w \
-           -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION} \
-           -X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3 \
-           -X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5" \
-         -o dist/linux-amd64/bin/ollama .
+# Rebuild main binary with CC 3.5 gate (ldflags; discover.* applies on 0.5.x)
+RUN go build -trimpath \
+      -ldflags "-s -w \
+        -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION} \
+        -X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3 \
+        -X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5" \
+      -o dist/linux-amd64/bin/ollama .
 
 # gcc-11 libstdc++ (GLIBCXX_3.4.29+) — runtime CUDA 20.04 image is too old for these symbols
 RUN mkdir -p /opt/gcc11-libs \
@@ -124,7 +126,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && mkdir -p /root/.ollama /opt/gcc11-libs
 
 COPY --from=builder /src/dist/linux-amd64/bin/ollama /bin/ollama
-COPY --from=builder /src/dist/linux-amd64/lib/ /lib/
+COPY --from=builder /src/dist/linux-amd64/lib/ollama/ /usr/lib/ollama/
 COPY --from=builder /opt/gcc11-libs/ /opt/gcc11-libs/
 
 EXPOSE 11434

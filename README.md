@@ -81,7 +81,7 @@ docker compose build --build-arg OLLAMA_VERSION=v0.5.7
 3. 上流 `ollama/ollama` を `OLLAMA_VERSION`（既定 `v0.5.4`）で checkout
 4. `discover/gpu.go` の CC 下限を **3.5** に変更（`CudaComputeMajorMin` / `MinorMin`、または旧 `CudaComputeMin`）
 5. `/usr/local/cuda-11` シンボリックリンクを作成（`make/cuda-v11-defs.make` が CUDA 11 を検出するため）
-6. `CUDA_ARCHITECTURES=35` で `make runners`（ROCm はスキップ）
+6. `CUDA_ARCHITECTURES=35` で `make dist`（ROCm はスキップ。`runners` だけだと `dist/.../lib` が空）
 7. `go build`（ldflags でも CC 3.5 を明示）して slim runtime イメージへ成果物をコピー
 
 詳細は [docs/build-notes.md](docs/build-notes.md)。
