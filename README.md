@@ -92,6 +92,19 @@ OpenFoodFlow staging はホスト公開の `11434` を `host.docker.internal:114
 
 - 本 Compose を **既存の `ollama-k40c-v0314` の置き換え**として使う場合、ポート `11434` の衝突に注意
 - モデルボリュームを引き継ぐ場合は `docker-compose.yml` の volume 名を合わせてください
+- **GPU 0（K40）を本サービスが専有**する想定。PaddleOCR などには GPU 1 か CPU を割り当てる（[docs/troubleshooting.md](docs/troubleshooting.md)）
+
+## トラブルシュート
+
+詳細は [docs/troubleshooting.md](docs/troubleshooting.md)（`nvidia-uvm`、VRAM が増えない、デュアル GPU）。
+
+```bash
+# ホスト（CUDA に必須）
+nvidia-modprobe -u -c=0
+
+docker exec ollama-k40c nvidia-smi
+docker exec ollama-k40c ollama ps
+```
 
 ## 制限・リスク
 

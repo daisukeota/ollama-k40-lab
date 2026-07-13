@@ -1,5 +1,9 @@
 # Dokploy / local Compose for Ollama on Tesla K40 (sm_35)
 #
+# sapphire 例（nvidia-smi）:
+#   GPU 0 = Tesla K40c   ← この Compose が専有（NVIDIA_VISIBLE_DEVICES=0）
+#   GPU 1 = GeForce 2GB  ← OpenFoodFlow paddle-ocr 等に割り当て
+#
 # Dokploy:
 #   - Compose Path: ./docker-compose.yml
 #   - Build enabled (first build is long)
@@ -19,6 +23,8 @@ services:
     image: ollama-k40-lab:local
     container_name: ollama-k40c
     restart: unless-stopped
+    # Compose v2 + nvidia-container-toolkit（k80-lab / ollama37 と同じ）
+    runtime: nvidia
     ports:
       - "11434:11434"
     volumes:
@@ -27,17 +33,27 @@ services:
       - ollama_k40_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
-      - NVIDIA_VISIBLE_DEVICES=all
+      # K40 のみ。GeForce を掴むと sm_35 CUBIN と不一致で失敗/CPU 落ちする
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-0}
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # 任意: 調査時のみ
+      # - OLLAMA_DEBUG=1
+      # - GGML_CUDA_DEBUG=1
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["${OLLAMA_GPU_DEVICE_ID:-0}"]
               capabilities: [gpu]
     networks:
       - dokploy-network
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
 volumes:
   ollama_k40_data:

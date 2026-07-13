@@ -113,7 +113,8 @@ Default `gcc`/`g++` remain **11** (Go/CGO + runtime `libstdc++`). Only nvcc host
 | Build cannot find CUDA 11 | `/usr/local/cuda-11` symlink |
 | `CUDA GPU is too old` | `CudaComputeMajorMin` / `MinorMin` patch + ldflags |
 | `nvcc fatal: Unsupported gpu architecture 'compute_35'` | Using CUDA 12 by mistake |
-| Container sees 0 GPUs | Host `nvidia-modprobe -u -c=0`, driver 470, NVIDIA Container Toolkit |
+| Container sees 0 GPUs / VRAM never grows | Host `nvidia-modprobe -u -c=0`; pin `NVIDIA_VISIBLE_DEVICES=0`; see [troubleshooting.md](troubleshooting.md) |
 | Port already in use | Stop previous `ollama-k40c-v0314` on 11434 |
 | `GLIBCXX_3.4.29` / `CXXABI_1.3.13` not found | Runtime must ship gcc-11 `libstdc++` (Dockerfile copies `/opt/gcc11-libs`). Rebuild image after pulling latest. |
 | Go version too old | v0.5.4 needs Go **1.23.4** (Dockerfile ARG) |
+| PaddleOCR also on this host | Do **not** give Paddle the K40; use GPU 1 or CPU (driver 470 ≠ cu118) |
