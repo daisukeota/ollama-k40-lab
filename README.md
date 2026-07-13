@@ -76,12 +76,13 @@ docker compose build --build-arg OLLAMA_VERSION=v0.5.7
 
 ## ビルドでやっていること
 
-1. `nvidia/cuda:11.4.3-devel-ubuntu20.04` 上で Go 1.23 / CMake / gcc-11 を用意
-2. 上流 `ollama/ollama` を `OLLAMA_VERSION`（既定 `v0.5.4`）で checkout
-3. `discover/gpu.go` の CC 下限を **3.5** に変更（`CudaComputeMajorMin` / `MinorMin`、または旧 `CudaComputeMin`）
-4. `/usr/local/cuda-11` シンボリックリンクを作成（`make/cuda-v11-defs.make` が CUDA 11 を検出するため）
-5. `CUDA_ARCHITECTURES=35` で `make runners`（ROCm はスキップ）
-6. `go build`（ldflags でも CC 3.5 を明示）して slim runtime イメージへ成果物をコピー
+1. `nvidia/cuda:11.4.3-devel-ubuntu20.04` 上で Go 1.23 / CMake / gcc-10+11 を用意
+2. nvcc ホストコンパイラは **g++-10**（GCC 11 × C++17 の `std_function.h` バグ回避）、Go 側は gcc-11
+3. 上流 `ollama/ollama` を `OLLAMA_VERSION`（既定 `v0.5.4`）で checkout
+4. `discover/gpu.go` の CC 下限を **3.5** に変更（`CudaComputeMajorMin` / `MinorMin`、または旧 `CudaComputeMin`）
+5. `/usr/local/cuda-11` シンボリックリンクを作成（`make/cuda-v11-defs.make` が CUDA 11 を検出するため）
+6. `CUDA_ARCHITECTURES=35` で `make runners`（ROCm はスキップ）
+7. `go build`（ldflags でも CC 3.5 を明示）して slim runtime イメージへ成果物をコピー
 
 詳細は [docs/build-notes.md](docs/build-notes.md)。
 

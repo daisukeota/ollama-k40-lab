@@ -84,11 +84,30 @@ docker exec ollama-k40c ollama -v
 
 Version must be **≥ 0.5.0**, then test `/api/chat` with a JSON Schema in `format` (see README).
 
+## CUDA host compiler (GCC 10 vs 11)
+
+Ollama 0.5.x CUDA runners compile with `-std=c++17`.  
+**CUDA 11.4 nvcc + GCC 11** hits a known libstdc++ bug:
+
+```text
+/usr/include/c++/11/bits/std_function.h: error: parameter packs not expanded with '...'
+```
+
+Dockerfile sets:
+
+```text
+CUDAHOSTCXX=/usr/bin/g++-10
+NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-10"
+```
+
+Default `gcc`/`g++` remain **11** (Go/CGO + runtime `libstdc++`). Only nvcc host code uses **g++-10**.
+
 ## Troubleshooting
 
 | Symptom | Check |
 |---------|--------|
 | `cannot unmarshal object into ... format of type string` | Still on ≤0.4.x — rebuild with `OLLAMA_VERSION=v0.5.4+` |
+| `std_function.h` / `parameter packs not expanded` | nvcc still on GCC 11 — ensure `NVCC_PREPEND_FLAGS=-ccbin /usr/bin/g++-10` |
 | Build cannot find CUDA 11 | `/usr/local/cuda-11` symlink |
 | `CUDA GPU is too old` | `CudaComputeMajorMin` / `MinorMin` patch + ldflags |
 | `nvcc fatal: Unsupported gpu architecture 'compute_35'` | Using CUDA 12 by mistake |

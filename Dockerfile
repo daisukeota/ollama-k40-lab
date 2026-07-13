@@ -31,7 +31,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     OLLAMA_SKIP_ROCM_GENERATE=1 \
     PATH=/usr/local/go/bin:/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+    LIBRARY_PATH=/usr/local/cuda/lib64/stubs \
+    # CUDA 11.4 nvcc + GCC 11 + -std=c++17 breaks on std_function.h ("parameter packs not expanded").
+    # Keep gcc-11 for Go/CGO; force nvcc host compiler to g++-10 (officially supported by CUDA 11.4).
+    CUDAHOSTCXX=/usr/bin/g++-10 \
+    NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-10"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -41,12 +45,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       software-properties-common \
       ccache \
       pigz \
+      gcc-10 \
+      g++-10 \
     && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get update && apt-get install -y --no-install-recommends \
       gcc-11 \
       g++-11 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz" \
