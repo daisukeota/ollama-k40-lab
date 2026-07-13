@@ -1,0 +1,47 @@
+# Dokploy / local Compose for Ollama on Tesla K40 (sm_35)
+#
+# Dokploy:
+#   - Compose Path: ./docker-compose.yml
+#   - Build enabled (first build is long)
+#   - Port 11434 must be free (stop ollama-k40c-v0314 first if replacing it)
+#
+# Build args (optional, Dokploy Advanced / compose build.args):
+#   OLLAMA_VERSION=v0.4.3
+
+services:
+  ollama-k40:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OLLAMA_VERSION: ${OLLAMA_VERSION:-v0.4.3}
+        CUDA_ARCHITECTURES: "35"
+    image: ollama-k40-lab:local
+    container_name: ollama-k40c
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      # Reuse old volume name if migrating from ollama-v0.3.14-cc35-dokploy:
+      #   ollama_v0314_data:/root/.ollama
+      - ollama_k40_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - dokploy-network
+
+volumes:
+  ollama_k40_data:
+
+networks:
+  dokploy-network:
+    external: true
