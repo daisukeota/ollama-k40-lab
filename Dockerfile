@@ -81,6 +81,12 @@ RUN mkdir -p dist/linux-amd64/bin \
     && go build -trimpath -ldflags "-s -w -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION}" \
          -o dist/linux-amd64/bin/ollama .
 
+# gcc-11 libstdc++ (GLIBCXX_3.4.29+) — runtime CUDA 20.04 image is too old for these symbols
+RUN mkdir -p /opt/gcc11-libs \
+    && cp -a /usr/lib/x86_64-linux-gnu/libstdc++.so.6* /opt/gcc11-libs/ \
+    && cp -a /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /opt/gcc11-libs/ \
+    && strings /opt/gcc11-libs/libstdc++.so.6 | grep -E 'GLIBCXX_3\.4\.29|CXXABI_1\.3\.13' | sort -u
+
 # -----------------------------------------------------------------------------
 # Runtime (Dokploy / compose)
 # -----------------------------------------------------------------------------
@@ -90,14 +96,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
     OLLAMA_HOST=0.0.0.0:11434 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    LD_LIBRARY_PATH=/usr/lib/ollama:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64
+    # Prefer bundled gcc-11 libs over distro libstdc++ (fixes GLIBCXX_3.4.29 / CXXABI_1.3.13)
+    LD_LIBRARY_PATH=/opt/gcc11-libs:/usr/lib/ollama:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /root/.ollama
+    && mkdir -p /root/.ollama /opt/gcc11-libs
 
 COPY --from=builder /src/dist/linux-amd64/bin/ollama /bin/ollama
 COPY --from=builder /src/dist/linux-amd64/lib/ /lib/
+COPY --from=builder /opt/gcc11-libs/ /opt/gcc11-libs/
 
 EXPOSE 11434
 VOLUME ["/root/.ollama"]

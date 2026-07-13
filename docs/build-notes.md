@@ -66,3 +66,4 @@ Version must be ≥ 0.4.3, then test `/api/chat` with a JSON Schema in `format` 
 | `nvcc fatal: Unsupported gpu architecture 'compute_35'` | Using CUDA 12 by mistake |
 | Container sees 0 GPUs | Host `nvidia-modprobe -u -c=0`, driver 470, NVIDIA Container Toolkit |
 | Port already in use | Stop previous `ollama-k40c-v0314` on 11434 |
+| `GLIBCXX_3.4.29` / `CXXABI_1.3.13` not found | Runtime must ship gcc-11 `libstdc++` (Dockerfile copies `/opt/gcc11-libs`). Rebuild image after pulling latest. |
