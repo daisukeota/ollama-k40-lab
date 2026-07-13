@@ -3,12 +3,15 @@
 # =============================================================================
 # Ollama for NVIDIA Tesla K40 (Compute Capability 3.5 / sm_35)
 # Base: daisukeota/ollama-v0.3.14-cc35-dokploy (CUDA 11.4 + Ubuntu 20.04)
-# Target: Ollama >= v0.4.3 (Structured Outputs / format=<JSON Schema>)
+# Target: Ollama >= v0.5.0 (Structured Outputs: format=<JSON Schema object>)
 # Method inspiration: dogkeeper886/ollama37 (legacy Kepler + modern Ollama)
 # =============================================================================
+#
+# Note: v0.4.3 accepts format as string ("json") only.
+#       JSON Schema objects require api.ChatRequest.Format = json.RawMessage (0.5.0+).
 
-ARG OLLAMA_VERSION=v0.4.3
-ARG GOLANG_VERSION=1.22.8
+ARG OLLAMA_VERSION=v0.5.4
+ARG GOLANG_VERSION=1.23.4
 ARG CMAKE_VERSION=3.26.4
 
 # -----------------------------------------------------------------------------
@@ -24,7 +27,7 @@ ARG CUDA_ARCHITECTURES=35
 ENV DEBIAN_FRONTEND=noninteractive \
     CGO_ENABLED=1 \
     CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
-    OLLAMA_SKIP_CUDA_12_GENERATE=1 \
+    OLLAMA_SKIP_CUDA_GENERATE= \
     OLLAMA_SKIP_ROCM_GENERATE=1 \
     PATH=/usr/local/go/bin:/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
@@ -55,30 +58,39 @@ RUN curl -fsSL "https://cmake.org/files/v${CMAKE_VERSION%.*}/cmake-${CMAKE_VERSI
     && /tmp/cmake.sh --prefix=/usr/local --skip-license \
     && rm /tmp/cmake.sh
 
-# Makefile.cuda_v11 looks for ${CUDA_PATH}-11 (default /usr/local/cuda-11)
+# make/cuda-v11-defs.make looks for ${CUDA_PATH}-11 (default /usr/local/cuda-11)
 RUN ln -sfn /usr/local/cuda /usr/local/cuda-11
 
 WORKDIR /src
 RUN git clone --depth 1 --branch "${OLLAMA_VERSION}" https://github.com/ollama/ollama.git .
 
-# Lower GPU gate from CC 5.0 -> CC 3.5 (same idea as ollama-v0.3.14-cc35-dokploy)
-# Prefer rewriting the declaration; also harden the comparison sites like the 0.3.14 recipe.
-RUN if grep -q 'var CudaComputeMin = \[2\]C.int{5, 0}' discover/gpu.go; then \
+# Lower GPU gate from CC 5.0 -> CC 3.5
+# - 0.5.x+: CudaComputeMajorMin / CudaComputeMinorMin (strings, ldflags-friendly)
+# - 0.4.x:  var CudaComputeMin = [2]C.int{5, 0}
+RUN if grep -q 'CudaComputeMajorMin' discover/gpu.go; then \
+      sed -i \
+        -e 's/CudaComputeMajorMin = "5"/CudaComputeMajorMin = "3"/' \
+        -e 's/CudaComputeMinorMin = "0"/CudaComputeMinorMin = "5"/' \
+        discover/gpu.go; \
+    elif grep -q 'var CudaComputeMin = \[2\]C.int{5, 0}' discover/gpu.go; then \
       sed -i 's/var CudaComputeMin = \[2\]C.int{5, 0}/var CudaComputeMin = [2]C.int{3, 5}/' discover/gpu.go; \
     else \
-      echo "CudaComputeMin declaration not found in expected form; applying comparison-site rewrite"; \
+      echo "WARN: unknown CudaCompute* form; applying comparison-site rewrite"; \
       sed -i 's/CudaComputeMin\[0\]/3/g; s/CudaComputeMin\[1\]/5/g' discover/gpu.go; \
     fi \
-    && grep -n 'CudaComputeMin' discover/gpu.go | head -n 20
+    && grep -nE 'CudaCompute(Major|Minor)?Min' discover/gpu.go | head -n 20
 
-# Build CUDA 11 runners for sm_35 only, then the Go server
+# Build CUDA 11 runners for sm_35 only (no cuda-12 path present), then the Go server
 RUN make -j"$(nproc)" runners \
       CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
-      OLLAMA_SKIP_CUDA_12_GENERATE=1 \
       OLLAMA_SKIP_ROCM_GENERATE=1
 
 RUN mkdir -p dist/linux-amd64/bin \
-    && go build -trimpath -ldflags "-s -w -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION}" \
+    && go build -trimpath \
+         -ldflags "-s -w \
+           -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION} \
+           -X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3 \
+           -X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5" \
          -o dist/linux-amd64/bin/ollama .
 
 # gcc-11 libstdc++ (GLIBCXX_3.4.29+) — runtime CUDA 20.04 image is too old for these symbols

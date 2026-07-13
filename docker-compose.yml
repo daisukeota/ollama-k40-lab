@@ -6,7 +6,7 @@
 #   - Port 11434 must be free (stop ollama-k40c-v0314 first if replacing it)
 #
 # Build args (optional, Dokploy Advanced / compose build.args):
-#   OLLAMA_VERSION=v0.4.3
+#   OLLAMA_VERSION=v0.5.4   # need >= 0.5.0 for JSON Schema in format
 
 services:
   ollama-k40:
@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        OLLAMA_VERSION: ${OLLAMA_VERSION:-v0.4.3}
+        OLLAMA_VERSION: ${OLLAMA_VERSION:-v0.5.4}
         CUDA_ARCHITECTURES: "35"
     image: ollama-k40-lab:local
     container_name: ollama-k40c

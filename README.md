@@ -1,6 +1,6 @@
 # Ollama K40 Lab (CC 3.5 / sm_35)
 
-NVIDIA **Tesla K40** (Compute Capability **3.5**) 向けに、Ollama **0.4.3+** を CUDA 11.4 でビルドし、Dokploy 上で動かす実験リポジトリです。
+NVIDIA **Tesla K40** (Compute Capability **3.5**) 向けに、Ollama **0.5.4+** を CUDA 11.4 でビルドし、Dokploy 上で動かす実験リポジトリです。
 
 上流 Ollama は Kepler（CC 3.5/3.7）を公式サポートしていません。本リポジトリは次をベースにしています。
 
@@ -16,10 +16,13 @@ NVIDIA **Tesla K40** (Compute Capability **3.5**) 向けに、Ollama **0.4.3+** 
 | GPU | Tesla K40 (`sm_35`) |
 | ホストドライバ | **470 系**（Kepler 最終） |
 | CUDA（ビルド） | **11.4** |
-| Ollama | 既定 **v0.4.3**（Structured Outputs 利用のため 0.4.3+） |
+| Ollama | 既定 **v0.5.4**（Structured Outputs = JSON Schema in `format`） |
 | デプロイ | Dokploy Compose |
 
-OpenFoodFlow などから `/api/chat` の **`format` に JSON Schema** を渡す Structured Outputs を使うには、Ollama **≥ 0.4.3** が必要です。
+OpenFoodFlow などから `/api/chat` の **`format` に JSON Schema オブジェクト**を渡すには、Ollama **≥ 0.5.0** が必要です。
+
+> **v0.4.3 では不可:** `format` が `string` のため、スキーマオブジェクトを送ると  
+> `json: cannot unmarshal object into Go struct field ChatRequest.format of type string` になります。
 
 ## クイックスタート（Dokploy）
 
@@ -66,19 +69,19 @@ docker compose up -d
 バージョンを上げる場合:
 
 ```bash
-docker compose build --build-arg OLLAMA_VERSION=v0.5.4
+docker compose build --build-arg OLLAMA_VERSION=v0.5.7
 ```
 
-> 新しいタグほど llama.cpp / CMake 周りが変わり、パッチが効かなくなることがあります。まずは **v0.4.3** で通すことを推奨します。
+> 新しいタグほど llama.cpp / CMake 周りが変わり、パッチが効かなくなることがあります。まずは **v0.5.4** で通すことを推奨します。
 
 ## ビルドでやっていること
 
-1. `nvidia/cuda:11.4.3-devel-ubuntu20.04` 上で Go / CMake / gcc-11 を用意
-2. 上流 `ollama/ollama` を `OLLAMA_VERSION`（既定 `v0.4.3`）で checkout
-3. `discover/gpu.go` の `CudaComputeMin` を **`{3, 5}`** に変更（CC 3.5 未満のみ除外）
-4. `/usr/local/cuda-11` シンボリックリンクを作成（Makefile が CUDA 11 を検出するため）
-5. `CUDA_ARCHITECTURES=35` で `make`（CUDA 12 / ROCm はスキップ）
-6. `go build` して slim runtime イメージへ成果物をコピー
+1. `nvidia/cuda:11.4.3-devel-ubuntu20.04` 上で Go 1.23 / CMake / gcc-11 を用意
+2. 上流 `ollama/ollama` を `OLLAMA_VERSION`（既定 `v0.5.4`）で checkout
+3. `discover/gpu.go` の CC 下限を **3.5** に変更（`CudaComputeMajorMin` / `MinorMin`、または旧 `CudaComputeMin`）
+4. `/usr/local/cuda-11` シンボリックリンクを作成（`make/cuda-v11-defs.make` が CUDA 11 を検出するため）
+5. `CUDA_ARCHITECTURES=35` で `make runners`（ROCm はスキップ）
+6. `go build`（ldflags でも CC 3.5 を明示）して slim runtime イメージへ成果物をコピー
 
 詳細は [docs/build-notes.md](docs/build-notes.md)。
 

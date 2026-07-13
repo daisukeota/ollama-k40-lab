@@ -5,18 +5,35 @@
 Tesla K40 (CC 3.5) needs an older nvcc that still emits `sm_35`. CUDA 12+ drops `compute_35`.  
 Host driver should stay on the **470** branch (last Kepler support).
 
+## Structured Outputs version gate
+
+| Ollama | `ChatRequest.format` | JSON Schema object |
+|--------|----------------------|--------------------|
+| ≤ 0.4.x | `string` | **No** (`"json"` only) |
+| ≥ 0.5.0 | `json.RawMessage` | **Yes** |
+
+Error on 0.4.3 with a schema object:
+
+```text
+json: cannot unmarshal object into Go struct field ChatRequest.format of type string
+```
+
+Default build tag for this repo: **v0.5.4**.
+
 ## Detection path (Makefile)
 
-Ollama v0.4.3 `llama/Makefile` enables `cuda_v11` when `/usr/local/cuda-11` exists.  
+Ollama v0.5.x top-level `Makefile` includes `make/cuda-v11-defs.make`, which enables `cuda_v11` when `/usr/local/cuda-11` exists.  
 The Dockerfile creates:
 
 ```text
 /usr/local/cuda-11 -> /usr/local/cuda
 ```
 
+With only the `-11` symlink present, `cuda_v12` is not selected (no `/usr/local/cuda-12`).
+
 ## Architecture
 
-`llama/make/Makefile.cuda_v11` defaults to:
+`make/Makefile.cuda_v11` defaults to:
 
 ```make
 CUDA_ARCHITECTURES?=50;52;53;60;61;62;70;72;75;80;86
@@ -32,20 +49,30 @@ so only **sm_35** CUBIN is built (faster build, matches K40).
 
 ## GPU minimum gate
 
-Upstream rejects GPUs older than CC 5.0 via:
+Upstream rejects GPUs older than CC 5.0. In **0.5.x**:
 
 ```go
-var CudaComputeMin = [2]C.int{5, 0}
+var (
+	CudaComputeMajorMin = "5"
+	CudaComputeMinorMin = "0"
+)
 ```
 
-We rewrite to `{3, 5}` so K40 is accepted.
+We rewrite to `"3"` / `"5"` and also pass ldflags:
+
+```text
+-X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3
+-X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5
+```
+
+Older **0.4.x** used `var CudaComputeMin = [2]C.int{5, 0}`; the Dockerfile still has a fallback sed for that form.
 
 ## Relationship to ollama37
 
 [dogkeeper886/ollama37](https://github.com/dogkeeper886/ollama37) targets **K80 / sm_37** with a polished builder/runtime split and follows newer Ollama.  
-This repo keeps the **Dokploy-friendly single Dockerfile** style from `ollama-v0.3.14-cc35-dokploy`, but lifts the Ollama tag to **0.4.3+** and forces **sm_35**.
+This repo keeps the **Dokploy-friendly single Dockerfile** style from `ollama-v0.3.14-cc35-dokploy`, but lifts the Ollama tag to **0.5.4+** and forces **sm_35**.
 
-To chase newer tags (0.5.x / 0.6.x), expect to rework patches when `discover/gpu.go` or the Make/CMake layout changes.
+To chase newer tags (0.6.x+), expect to rework patches when `discover/gpu.go` or the Make/CMake layout changes.
 
 ## Structured Outputs check
 
@@ -55,15 +82,17 @@ After deploy:
 docker exec ollama-k40c ollama -v
 ```
 
-Version must be ≥ 0.4.3, then test `/api/chat` with a JSON Schema in `format` (see README).
+Version must be **≥ 0.5.0**, then test `/api/chat` with a JSON Schema in `format` (see README).
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---------|--------|
+| `cannot unmarshal object into ... format of type string` | Still on ≤0.4.x — rebuild with `OLLAMA_VERSION=v0.5.4+` |
 | Build cannot find CUDA 11 | `/usr/local/cuda-11` symlink |
-| `CUDA GPU is too old` | `CudaComputeMin` patch applied? |
+| `CUDA GPU is too old` | `CudaComputeMajorMin` / `MinorMin` patch + ldflags |
 | `nvcc fatal: Unsupported gpu architecture 'compute_35'` | Using CUDA 12 by mistake |
 | Container sees 0 GPUs | Host `nvidia-modprobe -u -c=0`, driver 470, NVIDIA Container Toolkit |
 | Port already in use | Stop previous `ollama-k40c-v0314` on 11434 |
 | `GLIBCXX_3.4.29` / `CXXABI_1.3.13` not found | Runtime must ship gcc-11 `libstdc++` (Dockerfile copies `/opt/gcc11-libs`). Rebuild image after pulling latest. |
+| Go version too old | v0.5.4 needs Go **1.23.4** (Dockerfile ARG) |
