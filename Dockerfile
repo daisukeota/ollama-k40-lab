@@ -2,138 +2,97 @@
 
 # =============================================================================
 # Ollama for NVIDIA Tesla K40 (Compute Capability 3.5 / sm_35)
-# Base: daisukeota/ollama-v0.3.14-cc35-dokploy (CUDA 11.4 + Ubuntu 20.04)
-# Target: Ollama >= v0.5.0 (Structured Outputs: format=<JSON Schema object>)
-# Method inspiration: dogkeeper886/ollama37 (legacy Kepler + modern Ollama)
-# =============================================================================
 #
-# Note: v0.4.3 accepts format as string ("json") only.
-#       JSON Schema objects require api.ChatRequest.Format = json.RawMessage (0.5.0+).
+# Builds dogkeeper886/ollama37 (Kepler-era fork that tracks modern Ollama) with
+# native CUBIN for sm_35. Do NOT run dogkeeper886/ollama37 Hub images on K40 —
+# those ship sm_37+ only.
+#
+# Toolchain: dogkeeper886/ollama37-builder (Rocky 8, CUDA 11.4, GCC 10, CMake 4, Go)
+# Source pin: OLLAMA37_REF (default v2.2.3)
+# =============================================================================
 
-ARG OLLAMA_VERSION=v0.5.4
-ARG GOLANG_VERSION=1.23.4
-ARG CMAKE_VERSION=3.26.4
+ARG OLLAMA37_REF=v2.2.3
+ARG OLLAMA_VERSION=2.2.3-k40
+ARG CMAKE_CUDA_ARCHITECTURES=35-real
 
 # -----------------------------------------------------------------------------
-# Builder
+# Builder (reuse ollama37 toolchain; compile sm_35 CUBIN)
 # -----------------------------------------------------------------------------
-FROM nvidia/cuda:11.4.3-devel-ubuntu20.04 AS builder
+FROM dogkeeper886/ollama37-builder AS builder
 
+ARG OLLAMA37_REF
 ARG OLLAMA_VERSION
-ARG GOLANG_VERSION
-ARG CMAKE_VERSION
-ARG CUDA_ARCHITECTURES=35
+ARG CMAKE_CUDA_ARCHITECTURES
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    CGO_ENABLED=1 \
-    CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
-    OLLAMA_SKIP_CUDA_GENERATE= \
-    OLLAMA_SKIP_ROCM_GENERATE=1 \
-    PATH=/usr/local/go/bin:/usr/local/cuda/bin:${PATH} \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    LIBRARY_PATH=/usr/local/cuda/lib64/stubs \
-    # CUDA 11.4 nvcc + GCC 11 + -std=c++17 breaks on std_function.h ("parameter packs not expanded").
-    # Keep gcc-11 for Go/CGO; force nvcc host compiler to g++-10 (officially supported by CUDA 11.4).
-    CUDAHOSTCXX=/usr/bin/g++-10 \
-    NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-10"
+ENV PATH="/usr/local/go/bin:/usr/local/cuda-11.4/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:/usr/lib64:${LD_LIBRARY_PATH}"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates \
-      curl \
-      git \
-      build-essential \
-      software-properties-common \
-      ccache \
-      pigz \
-      gcc-10 \
-      g++-10 \
-    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
-    && apt-get update && apt-get install -y --no-install-recommends \
-      gcc-11 \
-      g++-11 \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110 \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100 \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /usr/local/src
 
-RUN curl -fsSL "https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz" \
-      | tar -C /usr/local -xz
+# Shallow clone of the pinned ollama37 release tag
+RUN git clone --depth 1 --branch "${OLLAMA37_REF}" https://github.com/dogkeeper886/ollama37.git
 
-RUN curl -fsSL "https://cmake.org/files/v${CMAKE_VERSION%.*}/cmake-${CMAKE_VERSION}-linux-x86_64.sh" \
-      -o /tmp/cmake.sh \
-    && chmod +x /tmp/cmake.sh \
-    && /tmp/cmake.sh --prefix=/usr/local --skip-license \
-    && rm /tmp/cmake.sh
+WORKDIR /usr/local/src/ollama37
 
-# make/cuda-v11-defs.make looks for ${CUDA_PATH}-11 (default /usr/local/cuda-11)
-RUN ln -sfn /usr/local/cuda /usr/local/cuda-11
-
-WORKDIR /src
-RUN git clone --depth 1 --branch "${OLLAMA_VERSION}" https://github.com/ollama/ollama.git .
-
-# Lower GPU gate from CC 5.0 -> CC 3.5
-# - 0.5.x+: CudaComputeMajorMin / CudaComputeMinorMin (strings, ldflags-friendly)
-# - 0.4.x:  var CudaComputeMin = [2]C.int{5, 0}
-RUN if grep -q 'CudaComputeMajorMin' discover/gpu.go; then \
-      sed -i \
-        -e 's/CudaComputeMajorMin = "5"/CudaComputeMajorMin = "3"/' \
-        -e 's/CudaComputeMinorMin = "0"/CudaComputeMinorMin = "5"/' \
-        discover/gpu.go; \
-    elif grep -q 'var CudaComputeMin = \[2\]C.int{5, 0}' discover/gpu.go; then \
-      sed -i 's/var CudaComputeMin = \[2\]C.int{5, 0}/var CudaComputeMin = [2]C.int{3, 5}/' discover/gpu.go; \
+# If a Go-side CC floor still exists (older layouts), lower it to 3.5.
+RUN set -eux; \
+    if grep -R --include='*.go' -l 'CudaComputeMajorMin' . >/dev/null 2>&1; then \
+      grep -R --include='*.go' -l 'CudaComputeMajorMin' . | while read -r f; do \
+        sed -i \
+          -e 's/CudaComputeMajorMin = "5"/CudaComputeMajorMin = "3"/' \
+          -e 's/CudaComputeMinorMin = "0"/CudaComputeMinorMin = "5"/' \
+          -e 's/CudaComputeMinorMin = "7"/CudaComputeMinorMin = "5"/' \
+          "$f"; \
+      done; \
     else \
-      echo "WARN: unknown CudaCompute* form; applying comparison-site rewrite"; \
-      sed -i 's/CudaComputeMin\[0\]/3/g; s/CudaComputeMin\[1\]/5/g' discover/gpu.go; \
-    fi \
-    && grep -nE 'CudaCompute(Major|Minor)?Min' discover/gpu.go | head -n 20
+      echo "INFO: no CudaComputeMajorMin in tree (expected on ollama37 v2.x)"; \
+    fi
 
-# `make runners` only builds under llama/build/; `make dist` also installs into dist/.../lib/ollama
-RUN make -j"$(nproc)" dist \
-      CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
-      OLLAMA_SKIP_ROCM_GENERATE=1 \
-    && test -d dist/linux-amd64/lib/ollama \
-    && find dist/linux-amd64/lib/ollama -type f | head -n 40
+# Reuse ollama37 "CUDA 11 K80" preset toolchain, but override CUBIN to sm_35 only.
+# (-D wins over preset cacheVariables; do not ship Hub ollama37 images on K40.)
+RUN CC=/usr/local/bin/gcc CXX=/usr/local/bin/g++ \
+      cmake --preset "CUDA 11 K80" \
+        -DCMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES}"
 
-# Rebuild main binary with CC 3.5 gate (ldflags; discover.* applies on 0.5.x)
-RUN go build -trimpath \
-      -ldflags "-s -w \
-        -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION} \
-        -X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3 \
-        -X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5" \
-      -o dist/linux-amd64/bin/ollama .
+RUN CC=/usr/local/bin/gcc CXX=/usr/local/bin/g++ \
+      cmake --build build -j"$(nproc)"
 
-# gcc-11 libstdc++ (GLIBCXX_3.4.29+) — runtime CUDA 20.04 image is too old for these symbols
-RUN mkdir -p /opt/gcc11-libs \
-    && cp -a /usr/lib/x86_64-linux-gnu/libstdc++.so.6* /opt/gcc11-libs/ \
-    && cp -a /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /opt/gcc11-libs/ \
-    && strings /opt/gcc11-libs/libstdc++.so.6 | grep -E 'GLIBCXX_3\.4\.29|CXXABI_1\.3\.13' | sort -u
+RUN cmake --install build --component CPU --strip \
+    && cmake --install build --component CUDA --strip \
+    && test -d dist/lib/ollama \
+    && find dist/lib/ollama -type f | head -n 40
+
+# Main binary; path layout expects /usr/bin/ollama -> ../lib/ollama
+RUN mkdir -p dist/bin \
+    && go build -trimpath \
+         -ldflags "-s -w -X=github.com/ollama/ollama/version.Version=${OLLAMA_VERSION}" \
+         -o dist/bin/ollama .
 
 # -----------------------------------------------------------------------------
 # Runtime (Dokploy / compose)
 # -----------------------------------------------------------------------------
-FROM nvidia/cuda:11.4.3-runtime-ubuntu20.04
+FROM rockylinux/rockylinux:8-minimal
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    OLLAMA_HOST=0.0.0.0:11434 \
+ENV OLLAMA_HOST=0.0.0.0:11434 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    # Prefer bundled gcc-11 libs over distro libstdc++ (fixes GLIBCXX_3.4.29 / CXXABI_1.3.13)
-    LD_LIBRARY_PATH=/opt/gcc11-libs:/usr/lib/ollama:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64
+    LD_LIBRARY_PATH=/usr/lib/ollama:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /root/.ollama /opt/gcc11-libs
+RUN microdnf install -y ca-certificates \
+    && microdnf clean all \
+    && mkdir -p /root/.ollama
 
-COPY --from=builder /src/dist/linux-amd64/bin/ollama /bin/ollama
-COPY --from=builder /src/dist/linux-amd64/lib/ollama/ /usr/lib/ollama/
-COPY --from=builder /opt/gcc11-libs/ /opt/gcc11-libs/
+COPY --from=builder /usr/local/src/ollama37/dist/bin/ollama /usr/bin/ollama
+COPY --from=builder /usr/local/src/ollama37/dist/lib/ollama/ /usr/lib/ollama/
+# GCC 10 runtime from ollama37-builder (Rocky 8 minimal ships older libstdc++)
+COPY --from=builder /usr/local/lib64/libstdc++.so* /usr/lib64/
+COPY --from=builder /usr/local/lib64/libgcc_s.so* /usr/lib64/
 
 EXPOSE 11434
 VOLUME ["/root/.ollama"]
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-  CMD /bin/ollama list || exit 1
+  CMD /usr/bin/ollama list || exit 1
 
-ENTRYPOINT ["/bin/ollama"]
+ENTRYPOINT ["/usr/bin/ollama"]
 CMD ["serve"]

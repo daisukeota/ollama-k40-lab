@@ -6,11 +6,13 @@
 #
 # Dokploy:
 #   - Compose Path: ./docker-compose.yml
-#   - Build enabled (first build is long)
+#   - Build enabled (first build is long — pulls ollama37-builder then compiles sm_35)
 #   - Port 11434 must be free (stop ollama-k40c-v0314 first if replacing it)
 #
-# Build args (optional, Dokploy Advanced / compose build.args):
-#   OLLAMA_VERSION=v0.5.4   # need >= 0.5.0 for JSON Schema in format
+# Build args (optional):
+#   OLLAMA37_REF=v2.2.3              # dogkeeper886/ollama37 git tag
+#   OLLAMA_VERSION=2.2.3-k40         # string baked into `ollama -v`
+#   CMAKE_CUDA_ARCHITECTURES=35-real # native CUBIN for K40 only
 
 services:
   ollama-k40:
@@ -18,8 +20,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        OLLAMA_VERSION: ${OLLAMA_VERSION:-v0.5.4}
-        CUDA_ARCHITECTURES: "35"
+        OLLAMA37_REF: ${OLLAMA37_REF:-v2.2.3}
+        OLLAMA_VERSION: ${OLLAMA_VERSION:-2.2.3-k40}
+        CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES:-35-real}
     image: ollama-k40-lab:local
     container_name: ollama-k40c
     restart: unless-stopped
@@ -49,7 +52,7 @@ services:
     networks:
       - dokploy-network
     healthcheck:
-      test: ["CMD", "/bin/ollama", "list"]
+      test: ["CMD", "/usr/bin/ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,8 +1,29 @@
-# Intended change for Ollama discover/gpu.go
+# Patches / deltas vs ollama37 (K80)
 
-## v0.5.x+ (default: v0.5.4)
+This lab does **not** vendor a static git patch against upstream Ollama.
+It builds [dogkeeper886/ollama37](https://github.com/dogkeeper886/ollama37) and changes only what K40 needs.
 
-Upstream rejects GPUs below CUDA Compute Capability 5.0:
+## CUDA architecture (required)
+
+ollama37’s `CUDA 11 K80` preset compiles:
+
+```text
+37-real;50-real;52-real;60-real;61-real;70-real;75-real;80-real;86-real
+```
+
+The Dockerfile keeps that preset’s toolchain but overrides:
+
+```text
+-DCMAKE_CUDA_ARCHITECTURES=35-real
+```
+
+so the image contains native CUBIN for Tesla K40 (`sm_35`) only.
+
+**Do not** run `dogkeeper886/ollama37` from Docker Hub on a K40 — those binaries have no `sm_35` CUBIN.
+
+## Go CC floor (optional / legacy)
+
+Older Ollama trees exposed:
 
 ```go
 var (
@@ -11,20 +32,5 @@ var (
 )
 ```
 
-For Tesla K40 (3.5) change to `"3"` / `"5"`. The Dockerfile applies this with
-`sed` and also passes Go ldflags:
-
-```text
--X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3
--X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5
-```
-
-## v0.4.x lineage (fallback)
-
-```go
-var CudaComputeMin = [2]C.int{5, 0}
-```
-
-→ `{3, 5}`. Dockerfile still has a sed branch for this form.
-
-A static git patch against upstream main is intentionally avoided because tags move.
+The Dockerfile greps for `CudaComputeMajorMin` and, if present, rewrites major/minor toward **3.5**.
+On ollama37 v2.x this symbol is typically absent; CUBIN match is what matters.

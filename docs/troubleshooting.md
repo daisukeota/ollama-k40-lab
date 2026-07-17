@@ -58,7 +58,7 @@ Nvidia GPU detected ... Tesla K40c ... vram=11441 MiB
 # 別ターミナルで監視
 watch -n1 nvidia-smi
 
-docker exec ollama-k40c ollama run qwen2.5:7b "hello"
+docker exec ollama-k40c ollama run deepseek-r1 "hello"
 docker exec ollama-k40c ollama ps
 docker logs ollama-k40c 2>&1 | grep -iE 'gpu|cuda|vram|layer'
 ```
@@ -70,6 +70,49 @@ CPU フォールバック時は GPU Memory がほぼ増えません。
 ```bash
 sudo ss -lptn 'sport = :11434'
 # 旧 ollama-k40c-v0314 を止めてから本 Compose を上げる
+```
+
+### 6. `pull model manifest: 412`（newer version of Ollama）
+
+**症状:**
+
+```text
+Error: pull model manifest: 412:
+The model you are attempting to pull requires a newer version of Ollama.
+```
+
+**原因:** コンテナが古いバイナリ（例: 上流 Ollama v0.5.4）のまま。`deepseek-r1`（latest）は Qwen3 系で、ollama37 世代のサーバが必要。
+
+**対処:**
+
+```bash
+docker exec ollama-k40c ollama -v
+# 期待例: 2.2.3-k40
+# まだ 0.5.x なら本リポジトリの Dockerfile で再ビルド / 再デプロイ
+```
+
+ビルド待ちの一時回避（Qwen2.5 蒸留）:
+
+```bash
+docker exec ollama-k40c ollama pull deepseek-r1:7b
+```
+
+### 7. Hub の `dogkeeper886/ollama37` を K40 に載せた
+
+**症状:** モデルロード失敗、CUBIN / arch 不一致、GPU フォールバック。
+
+**原因:** 公開イメージは `sm_37` 起点で **`sm_35` を含まない**。
+
+**対処:** 必ず本リポジトリの Compose で `35-real` ビルドした `ollama-k40-lab:local` を使う。
+
+## デプロイ後の確認コマンド
+
+```bash
+docker exec ollama-k40c ollama -v
+docker exec ollama-k40c nvidia-smi
+docker exec ollama-k40c ollama pull deepseek-r1
+docker exec ollama-k40c ollama run deepseek-r1 "1+1は？"
+curl -s http://127.0.0.1:11434/api/tags | head -c 300
 ```
 
 ## OpenFoodFlow との共存

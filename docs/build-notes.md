@@ -5,116 +5,68 @@
 Tesla K40 (CC 3.5) needs an older nvcc that still emits `sm_35`. CUDA 12+ drops `compute_35`.  
 Host driver should stay on the **470** branch (last Kepler support).
 
-## Structured Outputs version gate
+## Relationship to ollama37 / k80-lab
 
-| Ollama | `ChatRequest.format` | JSON Schema object |
-|--------|----------------------|--------------------|
-| ≤ 0.4.x | `string` | **No** (`"json"` only) |
-| ≥ 0.5.0 | `json.RawMessage` | **Yes** |
+| | ollama37 (K80) | this lab (K40) |
+|--|----------------|----------------|
+| Source | dogkeeper886/ollama37 | same, pinned tag |
+| Builder image | `dogkeeper886/ollama37-builder` | same |
+| CMake preset base | `CUDA 11 K80` | same preset + **arch override** |
+| CUBIN | `37-real` … `86-real` | **`35-real` only** |
+| Hub runtime image | `dogkeeper886/ollama37` | **do not use on K40** |
+| Default pin | Hub `v2.2.3` / `latest` | `OLLAMA37_REF=v2.2.3` |
 
-Error on 0.4.3 with a schema object:
+k80-lab は公開イメージを pull するラボ。こちらは **同じフォークを sm_35 向けに再ビルド**する。
 
-```text
-json: cannot unmarshal object into Go struct field ChatRequest.format of type string
-```
+## Version strings
 
-Default build tag for this repo: **v0.5.4**.
+- Git tag of the fork: `OLLAMA37_REF` (default `v2.2.3`)
+- Baked `ollama -v`: `OLLAMA_VERSION` (default `2.2.3-k40`)
 
-## Detection path (Makefile)
+These are **not** upstream `ollama/ollama` `v0.x` tags. ollama37 uses its own `v2.x` lineage while selectively porting modern model support (Qwen3, Gemma 4, deepseek-r1, …).
 
-Ollama v0.5.x top-level `Makefile` includes `make/cuda-v11-defs.make`, which enables `cuda_v11` when `/usr/local/cuda-11` exists.  
-The Dockerfile creates:
+## CMake architecture override
 
-```text
-/usr/local/cuda-11 -> /usr/local/cuda
-```
-
-With only the `-11` symlink present, `cuda_v12` is not selected (no `/usr/local/cuda-12`).
-
-## Architecture
-
-`make/Makefile.cuda_v11` defaults to:
-
-```make
-CUDA_ARCHITECTURES?=50;52;53;60;61;62;70;72;75;80;86
-```
-
-We override:
+ollama37 runtime Dockerfile runs:
 
 ```bash
-make dist CUDA_ARCHITECTURES=35
+cmake --preset "CUDA 11 K80"
 ```
 
-so only **sm_35** CUBIN is built (faster build, matches K40).  
-Use **`make dist`** (not only `make runners`) so artifacts land in `dist/linux-amd64/lib/ollama/` for the runtime image COPY.
-
-## GPU minimum gate
-
-Upstream rejects GPUs older than CC 5.0. In **0.5.x**:
-
-```go
-var (
-	CudaComputeMajorMin = "5"
-	CudaComputeMinorMin = "0"
-)
-```
-
-We rewrite to `"3"` / `"5"` and also pass ldflags:
-
-```text
--X=github.com/ollama/ollama/discover.CudaComputeMajorMin=3
--X=github.com/ollama/ollama/discover.CudaComputeMinorMin=5
-```
-
-Older **0.4.x** used `var CudaComputeMin = [2]C.int{5, 0}`; the Dockerfile still has a fallback sed for that form.
-
-## Relationship to ollama37
-
-[dogkeeper886/ollama37](https://github.com/dogkeeper886/ollama37) targets **K80 / sm_37** with a polished builder/runtime split and follows newer Ollama.  
-This repo keeps the **Dokploy-friendly single Dockerfile** style from `ollama-v0.3.14-cc35-dokploy`, but lifts the Ollama tag to **0.5.4+** and forces **sm_35**.
-
-To chase newer tags (0.6.x+), expect to rework patches when `discover/gpu.go` or the Make/CMake layout changes.
-
-## Structured Outputs check
-
-After deploy:
+This lab runs:
 
 ```bash
-docker exec ollama-k40c ollama -v
+cmake --preset "CUDA 11 K80" \
+  -DCMAKE_CUDA_ARCHITECTURES=35-real
 ```
 
-Version must be **≥ 0.5.0**, then test `/api/chat` with a JSON Schema in `format` (see README).
+Command-line `-D` overrides the preset’s `CMAKE_CUDA_ARCHITECTURES`, so only K40 CUBIN is built (faster than the full 37–86 sweep, and matches the only GPU this compose should see).
 
-## CUDA host compiler (GCC 10 vs 11)
+## Artifact layout
 
-Ollama 0.5.x CUDA runners compile with `-std=c++17`.  
-**CUDA 11.4 nvcc + GCC 11** hits a known libstdc++ bug:
+Same as ollama37:
 
-```text
-/usr/include/c++/11/bits/std_function.h: error: parameter packs not expanded with '...'
-```
+- Binary: `/usr/bin/ollama` → resolves libs via `../lib/ollama` → `/usr/lib/ollama`
+- Runtime base: `rockylinux/rockylinux:8-minimal`
+- GCC 10 `libstdc++` / `libgcc_s` copied from the builder into `/usr/lib64`
 
-Dockerfile sets:
+## Optional Go CC floor
 
-```text
-CUDAHOSTCXX=/usr/bin/g++-10
-NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-10"
-```
+If `CudaComputeMajorMin` appears in the tree, the Dockerfile rewrites it toward CC **3.5**.  
+On ollama37 v2.x this is usually absent; missing CUBIN for `sm_35` is the hard failure mode when using Hub images.
 
-Default `gcc`/`g++` remain **11** (Go/CGO + runtime `libstdc++`). Only nvcc host code uses **g++-10**.
+## Structured Outputs
 
-## Troubleshooting
+ollama37 v2.x is far past Ollama 0.5.0; JSON Schema in `/api/chat` `format` is expected to work. Verify after deploy with a small schema request (see README).
+
+## Troubleshooting (build)
 
 | Symptom | Check |
 |---------|--------|
-| `cannot unmarshal object into ... format of type string` | Still on ≤0.4.x — rebuild with `OLLAMA_VERSION=v0.5.4+` |
-| `std_function.h` / `parameter packs not expanded` | nvcc still on GCC 11 — ensure `NVCC_PREPEND_FLAGS=-ccbin /usr/bin/g++-10` |
-| `dist/linux-amd64/lib: not found` | Used `make runners` only — need `make dist` so libs are installed under `dist/` |
-| Build cannot find CUDA 11 | `/usr/local/cuda-11` symlink |
-| `CUDA GPU is too old` | `CudaComputeMajorMin` / `MinorMin` patch + ldflags |
-| `nvcc fatal: Unsupported gpu architecture 'compute_35'` | Using CUDA 12 by mistake |
-| Container sees 0 GPUs / VRAM never grows | Host `nvidia-modprobe -u -c=0`; pin `NVIDIA_VISIBLE_DEVICES=0`; see [troubleshooting.md](troubleshooting.md) |
+| `Unsupported gpu architecture 'compute_35'` | Builder somehow on CUDA 12 — must stay on ollama37-builder / CUDA 11.4 |
+| Hub image on K40: load fails / wrong arch | Rebuild with this Dockerfile (`35-real`); never run `dogkeeper886/ollama37` on K40 |
+| `GLIBCXX_*` not found | Runtime must copy GCC 10 libs from builder (Dockerfile already does) |
 | Port already in use | Stop previous `ollama-k40c-v0314` on 11434 |
-| `GLIBCXX_3.4.29` / `CXXABI_1.3.13` not found | Runtime must ship gcc-11 `libstdc++` (Dockerfile copies `/opt/gcc11-libs`). Rebuild image after pulling latest. |
-| Go version too old | v0.5.4 needs Go **1.23.4** (Dockerfile ARG) |
-| PaddleOCR also on this host | Do **not** give Paddle the K40; use GPU 1 or CPU (driver 470 ≠ cu118) |
+| Container sees 0 GPUs | Host `nvidia-modprobe -u -c=0`; pin `NVIDIA_VISIBLE_DEVICES=0` |
+| `pull ... 412` on deepseek-r1 | Still on old v0.5.4 image — redeploy this ollama37-based build |
+| PaddleOCR also on this host | Do **not** give Paddle the K40; use GPU 1 or CPU |
